@@ -79,6 +79,7 @@ class DDIMSampler(object):
                cond_tau=0.4,
                style_cond_tau=1.0,
                # this has to come in the same format as the conditioning, # e.g. as encoded tokens, ...
+               ref_latents=None,  # [MasaCtrl added] the reference image latents during ddim inversion
                **kwargs
                ):
         if conditioning is not None:
@@ -114,6 +115,7 @@ class DDIMSampler(object):
                                                     append_to_context=append_to_context,
                                                     cond_tau=cond_tau,
                                                     style_cond_tau=style_cond_tau,
+                                                    ref_latents=ref_latents,  # [MasaCtrl added] the reference image latents during ddim inversion
                                                     )
         return samples, intermediates
 
@@ -124,7 +126,7 @@ class DDIMSampler(object):
                       mask=None, x0=None, img_callback=None, log_every_t=100,
                       temperature=1., noise_dropout=0., score_corrector=None, corrector_kwargs=None,
                       unconditional_guidance_scale=1., unconditional_conditioning=None, features_adapter=None,
-                      append_to_context=None, cond_tau=0.4, style_cond_tau=1.0):
+                      append_to_context=None, cond_tau=0.4, style_cond_tau=1.0, ref_latents=None):
         device = self.model.betas.device
         b = shape[0]
         if x_T is None:
@@ -153,6 +155,16 @@ class DDIMSampler(object):
                 assert x0 is not None
                 img_orig = self.model.q_sample(x0, ts)  # TODO: deterministic forward pass?
                 img = img_orig * mask + (1. - mask) * img
+
+            if ref_latents is not None:
+                # [MasaCtrl added] the reference image latents during ddim inversion
+                if isinstance(ref_latents, list):
+                    ref_latents_t = ref_latents[-1-i]
+                elif isinstance(ref_latents, torch.Tensor):
+                    ref_latents_t = ref_latents
+                ref_latents_t = ref_latents_t.to(img.device)
+                assert img[:1].shape == ref_latents_t.shape, "Reference and target latents should be in the same shape!"
+                img = torch.cat([ref_latents_t, img[1:]], dim=0)  # replace the reference latents with the target latents
 
             outs = self.p_sample_ddim(img, cond, ts, index=index, use_original_steps=ddim_use_original_steps,
                                       quantize_denoised=quantize_denoised, temperature=temperature,
@@ -292,7 +304,7 @@ class DDIMSampler(object):
                                           unconditional_conditioning=unconditional_conditioning)
         return x_dec
 
-def ddim_sampling_reverse(self,
+    def ddim_sampling_reverse(self,
                               num_steps=50,
                               x_0=None,
                               conditioning=None,
